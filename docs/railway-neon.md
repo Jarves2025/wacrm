@@ -173,13 +173,18 @@ SECRET_KEY_BASE=<REALTIME_SECRET_KEY_BASE>
 ERL_AFLAGS=-proto_dist inet_tcp
 DNS_NODES=''
 APP_NAME=realtime
-SEED_SELF_HOST=true
+SEED_SELF_HOST=true        # cria o tenant no 1º boot; depois pode ser false
+CLUSTER_STRATEGIES=EPMD    # nó único: não procura outros nós pelo Postgres
 RUN_JANITOR=true
 ```
 
 No serviço `realtime`, ligue também **Settings → Networking → Outbound
 IPv6** (`ipv6EgressEnabled`): a conexão do tenant resolve o Neon por IPv6
 e ignora `DB_IP_VERSION`.
+
+`CLUSTER_STRATEGIES=EPMD` importa se houver mais de um serviço Realtime
+apontando para o mesmo banco: com o padrão (`POSTGRES`) eles formam um
+cluster pelo banco e o tenant pode ficar preso num nó inacessível.
 
 **gateway** (root directory `infra/railway/gateway`, domínio público na porta 8000)
 
@@ -225,24 +230,10 @@ que tem BYPASSRLS e é dono das tabelas).
 
 ### 6. Realtime no Neon
 
-Dois ajustes, depois que o serviço `realtime` subir uma vez (ele cria o
-tenant `realtime-dev` em `_realtime.tenants`):
+Depois que o serviço `realtime` subir uma vez (ele cria o tenant
+`realtime-dev` em `_realtime.tenants`):
 
-1. **Senha do tenant com `endpoint=`.** O Realtime conecta no banco do
-   tenant via TLS **sem SNI**, e o Neon usa o SNI para achar o endpoint.
-   O contorno documentado do Neon é a senha `endpoint=<ep-id>$<senha>`.
-   A conexão principal do Realtime (com SNI) precisa da senha normal, então
-   só a senha guardada do tenant muda:
-
-   ```bash
-   DATABASE_URL='postgresql://neondb_owner:...@ep-xxx.neon.tech/neondb?sslmode=require' \
-   REALTIME_DB_ENC_KEY=<DB_ENC_KEY do realtime> \
-   node scripts/neon-setup.mjs realtime-tenant
-   ```
-
-   Depois reinicie o serviço `realtime`.
-
-2. **Migrations do tenant.** 4 migrations do Realtime criam funções com
+1. **Migrations do tenant.** 4 migrations do Realtime criam funções com
    `SET log_min_messages`, que só superusuário pode. O script aplica essas
    sem a cláusula e deixa o próprio Realtime aplicar o resto:
 
@@ -254,6 +245,21 @@ tenant `realtime-dev` em `_realtime.tenants`):
 
    Termina com `realtime: all N tenant migrations applied`. Rode de novo
    se atualizar a imagem do Realtime.
+
+2. **Se o tenant não conectar.** Com `LOG_LEVEL=debug` no `realtime`,
+   o log mostra o erro do Postgrex. Com a senha normal do `neondb_owner`
+   ele conecta (testado). Se aparecer `Endpoint ID is not specified`, a
+   conexão está sem SNI: grave a senha do tenant no formato do Neon
+   `endpoint=<ep-id>$<senha>` e reinicie o serviço:
+
+   ```bash
+   DATABASE_URL='postgresql://neondb_owner:...@ep-xxx.neon.tech/neondb?sslmode=require' \
+   REALTIME_DB_ENC_KEY=<DB_ENC_KEY do realtime> \
+   node scripts/neon-setup.mjs realtime-tenant
+   ```
+
+   Esse formato quebra conexões **com** SNI (`invalid_password`), então
+   só use diante daquele erro.
 
 ### 7. Cron das automações (opcional)
 

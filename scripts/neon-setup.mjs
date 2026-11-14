@@ -9,8 +9,8 @@
 //   DATABASE_URL=... node scripts/neon-setup.mjs migrate
 //
 // `bootstrap` runs infra/neon/bootstrap.sql (roles, schemas, publication).
-// `realtime-tenant` makes Supabase Realtime's tenant connection work on
-//             Neon (see realtimeTenant below). Needs REALTIME_DB_ENC_KEY.
+// `realtime-tenant` only if Realtime's log shows `Endpoint ID is not
+//             specified` (see realtimeTenant below). Needs REALTIME_DB_ENC_KEY.
 // `migrate`   runs every supabase/migrations/*.sql not yet recorded in
 //             public._wacrm_migrations, in filename order, each file in
 //             its own transaction. Run it AFTER the auth and storage
@@ -112,8 +112,10 @@ async function migrate() {
   console.log('migrate: done');
 }
 
-// Supabase Realtime opens its per-tenant Postgres connection with TLS but
-// without SNI, and Neon needs SNI to know which endpoint to route to. Neon's
+// Fallback for when Supabase Realtime opens its per-tenant Postgres
+// connection without SNI (Neon then fails with `Endpoint ID is not
+// specified`). With SNI present the prefixed password is rejected
+// (`invalid_password`), so do not run this unless you see that error. Neon's
 // documented fallback is to put the endpoint in the password:
 // `endpoint=<endpoint-id>$<password>`. Realtime's own (SNI-capable)
 // connection must keep the plain password, so only the seeded tenant's
