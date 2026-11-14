@@ -1,0 +1,58 @@
+# API gateway for the self-hosted Supabase services on Railway.
+#
+# Plays the role Kong/Envoy plays in Supabase's docker-compose: one public
+# URL (NEXT_PUBLIC_SUPABASE_URL) with the paths supabase-js expects,
+# routed to the private services over Railway's internal network.
+#
+# Upstreams come from env vars set on the gateway service, e.g.
+#   AUTH_UPSTREAM=http://${{auth.RAILWAY_PRIVATE_DOMAIN}}:9999
+# CORS is handled by each upstream (GoTrue, PostgREST, storage-api).
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:{$PORT:8000} {
+	encode zstd gzip
+
+	respond /health 200
+
+	# GoTrue
+	handle_path /auth/v1/* {
+		reverse_proxy {$AUTH_UPSTREAM}
+	}
+
+	# PostgREST
+	handle_path /rest/v1/* {
+		reverse_proxy {$REST_UPSTREAM}
+	}
+
+	# storage-api
+	handle_path /storage/v1/* {
+		reverse_proxy {$STORAGE_UPSTREAM} {
+			header_up X-Forwarded-Prefix /storage/v1
+		}
+	}
+
+	# Realtime. The tenant is resolved from the first label of the Host
+	# header; the seeded self-host tenant is "realtime-dev".
+	handle /realtime/v1/api/* {
+		uri strip_prefix /realtime/v1
+		reverse_proxy {$REALTIME_UPSTREAM} {
+			header_up Host realtime-dev.supabase-realtime
+		}
+	}
+	handle_path /realtime/v1/* {
+		rewrite * /socket{uri}
+		reverse_proxy {$REALTIME_UPSTREAM} {
+			header_up Host realtime-dev.supabase-realtime
+		}
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+}
