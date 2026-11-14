@@ -64,8 +64,10 @@ JWT_SECRET=... node -e "const c=require('crypto');const s=process.env.JWT_SECRET
 ### 3. Bootstrap do banco
 
 Cria os roles (`anon`, `authenticated`, `service_role`, `authenticator`,
-`supabase_auth_admin`, `supabase_storage_admin`), schemas `auth`/`storage`
-e a publication `supabase_realtime`:
+`supabase_auth_admin`, `supabase_storage_admin`, `supabase_realtime_admin`
+e os substitutos `postgres`, `supabase_admin`, `dashboard_user` que as
+migrations dos serviços citam), schemas `auth`/`storage`/`realtime` e a
+publication `supabase_realtime`:
 
 ```bash
 DATABASE_URL='postgresql://neondb_owner:...@ep-xxx.neon.tech/neondb?sslmode=require' \
@@ -175,6 +177,10 @@ SEED_SELF_HOST=true
 RUN_JANITOR=true
 ```
 
+No serviço `realtime`, ligue também **Settings → Networking → Outbound
+IPv6** (`ipv6EgressEnabled`): a conexão do tenant resolve o Neon por IPv6
+e ignora `DB_IP_VERSION`.
+
 **gateway** (root directory `infra/railway/gateway`, domínio público na porta 8000)
 
 ```
@@ -217,7 +223,39 @@ Diferença para o Supabase Cloud: o Neon não tem superusuário `postgres`,
 então `OWNER TO postgres` vira `OWNER TO CURRENT_USER` (o dono do banco,
 que tem BYPASSRLS e é dono das tabelas).
 
-### 6. Cron das automações (opcional)
+### 6. Realtime no Neon
+
+Dois ajustes, depois que o serviço `realtime` subir uma vez (ele cria o
+tenant `realtime-dev` em `_realtime.tenants`):
+
+1. **Senha do tenant com `endpoint=`.** O Realtime conecta no banco do
+   tenant via TLS **sem SNI**, e o Neon usa o SNI para achar o endpoint.
+   O contorno documentado do Neon é a senha `endpoint=<ep-id>$<senha>`.
+   A conexão principal do Realtime (com SNI) precisa da senha normal, então
+   só a senha guardada do tenant muda:
+
+   ```bash
+   DATABASE_URL='postgresql://neondb_owner:...@ep-xxx.neon.tech/neondb?sslmode=require' \
+   REALTIME_DB_ENC_KEY=<DB_ENC_KEY do realtime> \
+   node scripts/neon-setup.mjs realtime-tenant
+   ```
+
+   Depois reinicie o serviço `realtime`.
+
+2. **Migrations do tenant.** 4 migrations do Realtime criam funções com
+   `SET log_min_messages`, que só superusuário pode. O script aplica essas
+   sem a cláusula e deixa o próprio Realtime aplicar o resto:
+
+   ```bash
+   DATABASE_URL='postgresql://neondb_owner:...@ep-xxx.neon.tech/neondb?sslmode=require' \
+   SUPABASE_URL=https://<domínio do gateway> ANON_KEY=... REALTIME_VERSION=v2.148.3 \
+   node scripts/realtime-neon-migrations.mjs
+   ```
+
+   Termina com `realtime: all N tenant migrations applied`. Rode de novo
+   se atualizar a imagem do Realtime.
+
+### 7. Cron das automações (opcional)
 
 Passos "Aguardar" das automações precisam de um ping periódico. Crie um
 serviço Railway com cron `*/5 * * * *` e start command:
@@ -226,14 +264,17 @@ serviço Railway com cron `*/5 * * * *` e start command:
 curl -fsS -H "x-cron-secret: $AUTOMATION_CRON_SECRET" https://$APP_DOMAIN/api/automations/cron
 ```
 
-### 7. Webhook do WhatsApp
+### 8. Webhook do WhatsApp
 
 Na Meta, use `https://<domínio do app>/api/whatsapp/webhook`.
 
 ## Limitações conhecidas
 
 - Sem SMTP configurado, não há e-mail de reset de senha nem de
-  confirmação (as contas são autoconfirmadas).
+  confirmação (as contas são autoconfirmadas). A tela de cadastro ainda
+  mostra "Verifique seu e-mail", mas a conta já entra logada.
+- CORS é respondido no gateway (`Access-Control-Allow-Origin: *`), como o
+  Kong faz no Supabase. O supabase-js autentica por header, não cookie.
 - O Realtime mantém uma conexão de replicação aberta, então o compute do
   Neon não hiberna enquanto ele roda.
 - Storage em volume do Railway (uma única réplica). Para produção, troque

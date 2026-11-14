@@ -111,6 +111,8 @@ Database setup runs over Neon's WebSocket driver (port 443):
 ```bash
 node scripts/neon-setup.mjs bootstrap   # roles, schemas, realtime publication
 node scripts/neon-setup.mjs migrate     # supabase/migrations/*.sql
+node scripts/neon-setup.mjs realtime-tenant      # Realtime ↔ Neon (no SNI)
+node scripts/realtime-neon-migrations.mjs        # Realtime's superuser-only migrations
 ```
 
 Full walkthrough (variables for every service, secrets, cron,
