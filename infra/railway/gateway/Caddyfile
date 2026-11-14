@@ -18,20 +18,27 @@
 :{$PORT:8000} {
 	encode zstd gzip
 
-	respond /health 200
+	# Only `handle` blocks: Caddy makes them mutually exclusive and tries
+	# the most specific path first, so the catch-all goes last on its own.
+	handle /health {
+		respond "ok" 200
+	}
 
 	# GoTrue
-	handle_path /auth/v1/* {
+	handle /auth/v1/* {
+		uri strip_prefix /auth/v1
 		reverse_proxy {$AUTH_UPSTREAM}
 	}
 
 	# PostgREST
-	handle_path /rest/v1/* {
+	handle /rest/v1/* {
+		uri strip_prefix /rest/v1
 		reverse_proxy {$REST_UPSTREAM}
 	}
 
 	# storage-api
-	handle_path /storage/v1/* {
+	handle /storage/v1/* {
+		uri strip_prefix /storage/v1
 		reverse_proxy {$STORAGE_UPSTREAM} {
 			header_up X-Forwarded-Prefix /storage/v1
 		}
@@ -45,8 +52,8 @@
 			header_up Host realtime-dev.supabase-realtime
 		}
 	}
-	handle_path /realtime/v1/* {
-		rewrite * /socket{uri}
+	handle /realtime/v1/* {
+		uri replace /realtime/v1/ /socket/ 1
 		reverse_proxy {$REALTIME_UPSTREAM} {
 			header_up Host realtime-dev.supabase-realtime
 		}
