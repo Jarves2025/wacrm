@@ -6,7 +6,9 @@
 #
 # Upstreams come from env vars set on the gateway service, e.g.
 #   AUTH_UPSTREAM=http://${{auth.RAILWAY_PRIVATE_DOMAIN}}:9999
-# CORS is handled by each upstream (GoTrue, PostgREST, storage-api).
+# CORS is answered here, like Kong's cors plugin does in Supabase's stack:
+# GoTrue rejects some supabase-js headers and storage-api 404s preflights.
+# supabase-js authenticates with headers, not cookies, so "*" is safe.
 {
 	admin off
 	auto_https off
@@ -15,8 +17,23 @@
 	}
 }
 
+(cors_preflight) {
+	@preflight method OPTIONS
+	header @preflight Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
+	header @preflight Access-Control-Allow-Headers "{header.Access-Control-Request-Headers}"
+	header @preflight Access-Control-Max-Age 86400
+	respond @preflight 204
+}
+
 :{$PORT:8000} {
 	encode zstd gzip
+
+	# Applied after the upstream answers, so it replaces (not duplicates)
+	# whatever Access-Control-Allow-Origin the upstream sent.
+	header {
+		Access-Control-Allow-Origin *
+		defer
+	}
 
 	# Only `handle` blocks: Caddy makes them mutually exclusive and tries
 	# the most specific path first, so the catch-all goes last on its own.
@@ -26,18 +43,21 @@
 
 	# GoTrue
 	handle /auth/v1/* {
+		import cors_preflight
 		uri strip_prefix /auth/v1
 		reverse_proxy {$AUTH_UPSTREAM}
 	}
 
 	# PostgREST
 	handle /rest/v1/* {
+		import cors_preflight
 		uri strip_prefix /rest/v1
 		reverse_proxy {$REST_UPSTREAM}
 	}
 
 	# storage-api
 	handle /storage/v1/* {
+		import cors_preflight
 		uri strip_prefix /storage/v1
 		reverse_proxy {$STORAGE_UPSTREAM} {
 			header_up X-Forwarded-Prefix /storage/v1
@@ -47,6 +67,7 @@
 	# Realtime. The tenant is resolved from the first label of the Host
 	# header; the seeded self-host tenant is "realtime-dev".
 	handle /realtime/v1/api/* {
+		import cors_preflight
 		uri strip_prefix /realtime/v1
 		reverse_proxy {$REALTIME_UPSTREAM} {
 			header_up Host realtime-dev.supabase-realtime

@@ -29,11 +29,24 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
     CREATE ROLE postgres NOLOGIN;
   END IF;
+  -- Referenced by Realtime's tenant migrations (GRANT/REVOKE ... dashboard_user,
+  -- ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin). NOLOGIN stand-ins.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN
+    CREATE ROLE dashboard_user NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    CREATE ROLE supabase_admin NOLOGIN;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
     CREATE ROLE authenticator LOGIN NOINHERIT;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
     CREATE ROLE supabase_auth_admin LOGIN NOINHERIT CREATEROLE;
+  END IF;
+  -- Realtime's tenant migrations move ownership of realtime.* to this
+  -- role; the database owner must be a member for that to be allowed.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+    CREATE ROLE supabase_realtime_admin NOINHERIT NOLOGIN NOREPLICATION;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN
     CREATE ROLE supabase_storage_admin LOGIN NOINHERIT CREATEROLE;
@@ -59,7 +72,7 @@ GRANT anon, authenticated, service_role TO supabase_storage_admin;
 -- the tables — the two things those functions rely on.
 DO $$
 BEGIN
-  EXECUTE format('GRANT supabase_auth_admin, supabase_storage_admin, service_role, authenticated, anon TO %I', current_user);
+  EXECUTE format('GRANT supabase_auth_admin, supabase_storage_admin, supabase_realtime_admin, supabase_admin, service_role, authenticated, anon TO %I', current_user);
 END
 $$;
 
