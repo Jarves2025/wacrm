@@ -82,7 +82,11 @@ async function migrate() {
     .sort();
   for (const file of files) {
     if (done.has(file)) continue;
-    const sql = fs.readFileSync(path.join(dir, file), 'utf8');
+    // Neon has no `postgres` superuser; the database owner (BYPASSRLS,
+    // owns every table) takes that role for SECURITY DEFINER functions.
+    const sql = fs
+      .readFileSync(path.join(dir, file), 'utf8')
+      .replace(/OWNER TO postgres\b/gi, 'OWNER TO CURRENT_USER');
     try {
       await client.query('BEGIN');
       await client.query(sql);

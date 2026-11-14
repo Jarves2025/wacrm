@@ -24,12 +24,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
   END IF;
-  -- On hosted Supabase `postgres` is the superuser that owns the
-  -- SECURITY DEFINER functions (migrations run `OWNER TO postgres`).
-  -- Here it is a NOLOGIN role with BYPASSRLS, which is what those
-  -- functions actually rely on.
+  -- GoTrue's and storage-api's own migrations grant to `postgres` when it
+  -- exists, as on hosted Supabase. NOLOGIN stand-in; it owns nothing.
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
-    CREATE ROLE postgres NOLOGIN BYPASSRLS;
+    CREATE ROLE postgres NOLOGIN;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
     CREATE ROLE authenticator LOGIN NOINHERIT;
@@ -51,11 +49,17 @@ GRANT anon, authenticated, service_role TO authenticator;
 GRANT anon, authenticated, service_role TO supabase_storage_admin;
 
 -- The database owner (the role Neon gives you, e.g. neondb_owner) applies
--- the app migrations, which add triggers on auth.users, policies on
--- storage.objects and `OWNER TO postgres`. Membership makes that legal.
+-- the app migrations, which add triggers on auth.users and policies on
+-- storage.objects. Membership makes that legal.
+--
+-- Hosted Supabase has a `postgres` superuser that owns the SECURITY
+-- DEFINER functions (`OWNER TO postgres` in the migrations). Neon has
+-- none; scripts/neon-setup.mjs rewrites those lines to OWNER TO
+-- CURRENT_USER, i.e. the database owner, which has BYPASSRLS and owns
+-- the tables — the two things those functions rely on.
 DO $$
 BEGIN
-  EXECUTE format('GRANT postgres, supabase_auth_admin, supabase_storage_admin, service_role, authenticated, anon TO %I', current_user);
+  EXECUTE format('GRANT supabase_auth_admin, supabase_storage_admin, service_role, authenticated, anon TO %I', current_user);
 END
 $$;
 
@@ -93,7 +97,6 @@ GRANT ALL ON ALL ROUTINES  IN SCHEMA public TO anon, authenticated, service_role
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES  TO anon, authenticated, service_role;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON ROUTINES TO anon, authenticated, service_role;
 
 -- PostgREST exposes the `public` schema only.
 ALTER ROLE authenticator SET statement_timeout = '8s';
