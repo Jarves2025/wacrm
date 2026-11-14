@@ -19,6 +19,27 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
  *     deny them. A supply-chain compromise or a forgotten plugin
  *     can't silently opt back in.
  */
+/**
+ * Origins of the Supabase-compatible API the browser talks to. Hosted
+ * Supabase lives on *.supabase.co; a self-hosted stack (e.g. the
+ * Railway + Neon setup in docs/railway-neon.md) lives on whatever host
+ * NEXT_PUBLIC_SUPABASE_URL points at, so derive it from that too.
+ */
+const SUPABASE_ORIGINS = (() => {
+  const origins = ["https://*.supabase.co"];
+  const ws = ["wss://*.supabase.co"];
+  try {
+    const url = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "");
+    if (!url.hostname.endsWith(".supabase.co")) {
+      origins.push(url.origin);
+      ws.push(`${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`);
+    }
+  } catch {
+    // Unset or malformed at build time — keep the hosted defaults.
+  }
+  return { http: origins.join(" "), ws: ws.join(" ") };
+})();
+
 const SECURITY_HEADERS = [
   {
     key: "Strict-Transport-Security",
@@ -51,11 +72,11 @@ const SECURITY_HEADERS = [
       "img-src 'self' data: blob: https:",
       // Outbound media previews (blob: from MediaRecorder + file picker)
       // and Supabase public-bucket audio/video the inbox renders.
-      "media-src 'self' blob: https://*.supabase.co",
+      `media-src 'self' blob: ${SUPABASE_ORIGINS.http}`,
       "font-src 'self' data:",
       // Supabase REST + realtime (WSS). All Meta API calls happen
       // server-side, so graph.facebook.com does not belong here.
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+      `connect-src 'self' ${SUPABASE_ORIGINS.http} ${SUPABASE_ORIGINS.ws}`,
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
